@@ -1,0 +1,998 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transaction Scanner</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.29/jspdf.plugin.autotable.min.js"></script>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        .container { max-width: 100%; margin: 0 auto; }
+        .table-container { max-height: 60vh; overflow: auto; margin-top: 20px; border: 1px solid #ddd; }
+        .input-group { margin-bottom: 20px; display: flex; gap: 10px; }
+        input { flex-grow: 1; padding: 10px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px; }
+        button { padding: 10px 20px; background-color: #fff; color: #333; border: 1px solid #ccc; cursor: pointer; font-size: 16px; border-radius: 4px; }
+        button:hover { background-color: #f0f0f0; border-color: #bbb; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; white-space: nowrap; }
+        th { background-color: #f8f9fa; position: sticky; top: 0; z-index: 2; }
+        tr:focus { outline: 2px solid #666; background-color: #f9f9f9; }
+        .pagination { margin-top: 15px; display: flex; justify-content: center; gap: 15px; align-items: center; }
+        .pagination button { padding: 5px 15px; }
+        .pagination button:disabled { background-color: #cccccc; cursor: not-allowed; }
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); }
+        .modal-content { background-color: white; margin: 15% auto; padding: 20px; border-radius: 5px; width: 300px; text-align: center; }
+        .modal-content select { width: 100%; padding: 8px; margin: 10px 0; font-size: 16px; }
+        .summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 20px; }
+        .card { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); text-align: center; border: 1px solid #ddd; cursor: pointer; transition: transform 0.2s; }
+        .card:hover { transform: translateY(-2px); }
+        .card.active-filter { border: 2px solid #007bff; background-color: #f0f8ff; }
+        .card h3 { margin: 0 0 10px 0; color: #555; font-size: 14px; text-transform: uppercase; }
+        .card p { margin: 0; font-size: 24px; font-weight: bold; color: #007bff; }
+        .icon-btn { padding: 8px 12px; font-size: 20px; border: 1px solid transparent; cursor: pointer; margin-right: 4px; border-radius: 8px; background: transparent; color: #333; transition: all 0.2s ease; }
+        .icon-btn:hover { background-color: #e2e6ea; transform: scale(1.25); box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .bulk-btn { display: none; margin-left: 5px; }
+        #toast-container { position: fixed; top: 30px; left: 50%; transform: translateX(-50%); z-index: 2000; display: flex; flex-direction: column; gap: 15px; align-items: center; }
+        .toast { padding: 20px 50px; font-size: 22px; font-weight: 500; border-radius: 50px; color: white; min-width: 300px; text-align: center; box-shadow: 0 8px 20px rgba(0,0,0,0.25); animation: slideDown 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); opacity: 1; transition: opacity 0.3s; }
+        .toast.error { background-color: #dc3545; }
+        .toast.success { background-color: #28a745; }
+        .toast.info { background-color: #333; }
+        @keyframes slideDown { from { transform: translateY(-100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .progress-container { width: 100%; background-color: #e9ecef; border-radius: 4px; height: 10px; margin-top: 10px; overflow: hidden; }
+        .progress-bar { height: 100%; background-color: #28a745; width: 0%; transition: width 0.3s ease, background-color 0.3s ease; }
+        #loginOverlay, #branchOverlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #e9ecef; z-index: 9999; display: flex; justify-content: center; align-items: center; }
+        .login-container { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 100%; max-width: 400px; text-align: center; }
+        .login-container h2 { margin-top: 0; margin-bottom: 20px; color: #333; }
+        .login-container input { width: 100%; margin-bottom: 15px; padding: 12px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 16px; }
+        .login-container button { width: 100%; padding: 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; transition: background 0.3s; }
+        .login-container button:hover { background-color: #0056b3; }
+        .error-msg { color: #dc3545; margin-top: 10px; display: none; }
+    </style>
+</head>
+<body>
+
+<div id="loginOverlay">
+    <div class="login-container">
+        <h2>IST Scanner Login</h2>
+        <input type="text" id="loginUser" placeholder="Username (admin)" onkeyup="if(event.key==='Enter') document.getElementById('loginPass').focus()">
+        <input type="password" id="loginPass" placeholder="Password (1234)" onkeyup="if(event.key==='Enter') attemptLogin()">
+        <button onclick="attemptLogin()">Login</button>
+        <p id="loginError" class="error-msg">Invalid Username or Password</p>
+    </div>
+</div>
+
+<div id="branchOverlay" style="display: none;">
+    <div class="login-container">
+        <h2>Route Details</h2>
+        <input type="text" id="fromBranchInput" placeholder="From Branch Code" onkeyup="if(event.key==='Enter') document.getElementById('toBranchInput').focus()">
+        <input type="text" id="toBranchInput" placeholder="To Branch / Store / DC Code" onkeyup="if(event.key==='Enter') confirmBranchInfo()">
+        <button onclick="confirmBranchInfo()">Start Scanning</button>
+    </div>
+</div>
+
+<div class="container">
+    <h2>Scan IST <span id="routeDisplay" style="font-size: 0.6em; margin-left: 10px; color: #666;"></span></h2>
+    
+    <div id="toast-container"></div>
+
+    <div class="summary-cards">
+        <div class="card" id="cardTotal" onclick="handleStatusFilter('all')">
+            <h3>Total Scans</h3>
+            <p id="totalScans">0</p>
+        </div>
+        <div class="card">
+            <h3>Unique Trucks</h3>
+            <p id="uniqueTrucks">0</p>
+        </div>
+        <div class="card">
+            <h3>Latest Scan</h3>
+            <p id="latestScan">-</p>
+        </div>
+        <div class="card" id="cardLoaded" onclick="handleStatusFilter('loaded')">
+            <h3>Loaded</h3>
+            <p id="loadedCount" style="color: #28a745;">0</p>
+        </div>
+        <div class="card" id="cardUnloaded" onclick="handleStatusFilter('unloaded')">
+            <h3>Unloaded</h3>
+            <p id="unloadedCount" style="color: #dc3545;">0</p>
+        </div>
+        <div class="card">
+            <h3>Progress</h3>
+            <p id="loadProgress">0%</p>
+            <div class="progress-container">
+                <div id="progressBar" class="progress-bar"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="input-group">
+        <input type="text" id="scanInput" placeholder="Scan transaction number here..." autofocus>
+        <input type="text" id="searchInput" placeholder="Search transactions..." onkeyup="handleSearch(this.value)">
+        <input type="text" id="loadIdFilterInput" placeholder="Filter by Load ID..." onkeyup="handleLoadIdFilter(this.value)">
+        <span style="align-self: center;">From:</span> <input type="date" id="dateFrom" onchange="handleDateFilter()" style="flex-grow: 0; width: auto;">
+        <span style="align-self: center;">To:</span> <input type="date" id="dateTo" onchange="handleDateFilter()" style="flex-grow: 0; width: auto;">
+        <button onclick="clearAllFilters()" title="Clear All Filters">Clear Filters</button>
+        <button onclick="openModal()">Select Truck</button>
+        <button onclick="openMasterModal()">Manage Trucks</button>
+        <button id="bulkLoadBtn" class="bulk-btn" style="margin-left: auto;" onclick="executeBulkLoad()">Load Selected</button>
+        <button id="bulkDeleteBtn" class="bulk-btn" onclick="executeBulkDelete()">Delete Selected</button>
+        <button onclick="exportToExcel()">Export to Excel</button>
+        <button onclick="printLoadedPDF()">Print Manifest (PDF)</button>
+        <button onclick="logout()" style="background-color: #6c757d; color: white;">Logout</button>
+    </div>
+    <div style="margin-bottom: 10px; font-weight: bold; color: #555;" id="truckDisplay">Current Truck: N/A</div>
+
+    <div class="table-container">
+    <table id="scanTable">
+        <thead>
+            <tr>
+                <th><input type="checkbox" id="selectAll" onclick="toggleSelectAll(this)"></th>
+                <th>Transaction Number</th>
+                <th>Timestamp</th>
+                <th>From</th>
+                <th>To</th>
+                <th>Plate Number</th>
+                <th>Trucker Name</th>
+                <th>Load ID</th>
+                <th>Loaded Time</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Scanned items will appear here -->
+        </tbody>
+    </table>
+    </div>
+
+    <div class="pagination">
+        <button id="prevBtn" onclick="changePage(-1)" disabled>Previous</button>
+        <span id="pageInfo">Page 1 of 1</span>
+        <button id="nextBtn" onclick="changePage(1)" disabled>Next</button>
+        <select id="rowsPerPageSelect" onchange="changeRowsPerPage(this.value)" style="margin-left: 10px; padding: 5px; border-radius: 4px; border: 1px solid #ccc;">
+            <option value="10">10 rows</option>
+            <option value="50">50 rows</option>
+            <option value="100">100 rows</option>
+        </select>
+    </div>
+</div>
+
+<!-- Modal for Time Editing -->
+<div id="timeModal" class="modal">
+    <div class="modal-content">
+        <h3>Edit Loaded Time</h3>
+        <input type="text" id="timeInput" style="width: 100%; padding: 8px; margin: 10px 0; font-size: 16px;">
+        <div style="margin-top: 10px;">
+            <button onclick="saveTime()">Save</button>
+            <button onclick="closeTimeModal()" style="background-color: #6c757d;">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal for Truck Selection -->
+<div id="plateModal" class="modal">
+    <div class="modal-content">
+        <h3>Enter Plate Number</h3>
+        <input type="text" id="plateInput" list="plateList" placeholder="Type or select plate..." style="width: 100%; padding: 8px; margin: 10px 0; font-size: 16px;">
+        <datalist id="plateList">
+        </datalist>
+        <input type="text" id="loadIdInput" placeholder="Load / Trip ID (Optional)" style="width: 100%; padding: 8px; margin: 10px 0; font-size: 16px;">
+        <div style="margin-top: 10px;">
+            <button onclick="savePlate()">Save</button>
+            <button onclick="closeModal()" style="background-color: #6c757d;">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal for Master List Management -->
+<div id="masterModal" class="modal">
+    <div class="modal-content" style="width: 500px;">
+        <h3>Manage Truck Plates</h3>
+        <div style="display: flex; gap: 5px; margin-bottom: 15px;">
+            <input type="text" id="newPlateInput" placeholder="Plate Number" style="text-transform: uppercase; flex: 1;">
+            <input type="text" id="newTruckerInput" placeholder="Trucker Name" style="flex: 1;">
+            <button onclick="addMasterPlate()" style="padding: 10px;">Add</button>
+        </div>
+        <ul id="masterList" style="list-style: none; padding: 0; max-height: 300px; overflow-y: auto; text-align: left;">
+            <!-- List items will be injected here -->
+        </ul>
+        <button onclick="closeMasterModal()" style="background-color: #6c757d; margin-top: 10px;">Close</button>
+    </div>
+</div>
+
+<script>
+    let scannedData = JSON.parse(localStorage.getItem('scannedTransactions')) || [];
+    let masterPlates = JSON.parse(localStorage.getItem('masterPlates')) || [];
+    // Migration for old string-only masterPlates
+    if (masterPlates.length > 0 && typeof masterPlates[0] === 'string') {
+        masterPlates = masterPlates.map(p => ({ plate: p, name: '' }));
+        localStorage.setItem('masterPlates', JSON.stringify(masterPlates));
+    }
+    let searchTerm = "";
+    let filterDateFrom = "";
+    let filterDateTo = "";
+    let filterStatus = "all";
+    let filterLoadId = "";
+    let selectedTransactions = new Set();
+    let currentPage = 1;
+    let currentPlate = localStorage.getItem('currentPlate') || "N/A";
+    let currentTruckerName = localStorage.getItem('currentTruckerName') || "";
+    let currentLoadId = localStorage.getItem('currentLoadId') || "";
+    let currentFromBranch = localStorage.getItem('currentFromBranch') || "";
+    let currentToBranch = localStorage.getItem('currentToBranch') || "";
+    let focusedTransactionId = null;
+    let editIndex = null;
+    let rowsPerPage = 10;
+    const input = document.getElementById('scanInput');
+    const tbody = document.querySelector('#scanTable tbody');
+
+    let scanTimeout;
+
+    function processScan() {
+        const value = input.value.trim();
+        if (value) {
+            // Validation: Must be exactly 10 digits
+            if (!/^\d{10}$/.test(value)) {
+                playErrorSound();
+                showToast("Invalid Input: Must be 10 digits", "error");
+                input.value = '';
+                input.focus();
+                return;
+            }
+            if (scannedData.some(item => item["Transaction Number"] === value)) {
+                playErrorSound();
+                showToast("Duplicate transaction detected!", "error");
+                input.value = '';
+                input.focus();
+                return;
+            }
+            playSuccessSound();
+            // Prevent table render from stealing focus back to a row
+            focusedTransactionId = null;
+            addTransaction(value);
+            input.value = ''; // Clear input for next scan
+            input.focus();
+        }
+    }
+
+    // Listen for 'Enter' key, which scanners usually send after a scan
+    input.addEventListener('keypress', function (e) {
+        if (e.key === 'Enter') {
+            clearTimeout(scanTimeout);
+            processScan();
+        }
+    });
+
+    // Auto-submit after scan (detects end of typing/scanning)
+    input.addEventListener('input', function() {
+        clearTimeout(scanTimeout);
+        scanTimeout = setTimeout(processScan, 200); // 200ms delay to wait for scanner to finish
+    });
+
+    // Ensure scanning works even if focus is on the table or body
+    document.addEventListener('keydown', function(e) {
+        const tag = document.activeElement.tagName;
+        // If user types a character and focus is NOT in an input/button/select
+        if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey && tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+            input.focus();
+        }
+    });
+
+    function addTransaction(number) {
+        const now = new Date();
+        const timestamp = now.toLocaleString();
+
+        const dataItem = { "Transaction Number": number, "Timestamp": timestamp, "From Branch": currentFromBranch, "To Branch": currentToBranch, "Plate Number": currentPlate, "Trucker Name": currentTruckerName, "Load ID": currentLoadId, "Loaded Time": "" };
+
+        // Add to data array for export
+        scannedData.unshift(dataItem);
+        saveData();
+        currentPage = 1;
+        renderTable();
+    }
+
+    function handleSearch(val) {
+        searchTerm = val.toLowerCase();
+        currentPage = 1; // Reset to first page on search
+        renderTable();
+    }
+
+    function handleDateFilter() {
+        filterDateFrom = document.getElementById('dateFrom').value;
+        filterDateTo = document.getElementById('dateTo').value;
+        currentPage = 1; 
+        renderTable();
+    }
+
+    function handleLoadIdFilter(val) {
+        filterLoadId = val.toLowerCase();
+        currentPage = 1;
+        renderTable();
+    }
+
+    function clearAllFilters() {
+        document.getElementById('dateFrom').value = '';
+        document.getElementById('dateTo').value = '';
+        filterDateFrom = "";
+        filterDateTo = "";
+
+        document.getElementById('searchInput').value = '';
+        searchTerm = "";
+
+        document.getElementById('loadIdFilterInput').value = '';
+        filterLoadId = "";
+
+        currentPage = 1;
+        renderTable();
+    }
+
+    function handleStatusFilter(status) {
+        // Toggle off if clicking the already active filter, unless it's 'all'
+        if (filterStatus === status && status !== 'all') {
+            filterStatus = 'all';
+        } else {
+            filterStatus = status;
+        }
+        
+        // Update UI styling
+        document.querySelectorAll('.card').forEach(c => c.classList.remove('active-filter'));
+        if (filterStatus === 'loaded') document.getElementById('cardLoaded').classList.add('active-filter');
+        if (filterStatus === 'unloaded') document.getElementById('cardUnloaded').classList.add('active-filter');
+        if (filterStatus === 'all') document.getElementById('cardTotal').classList.add('active-filter');
+
+        currentPage = 1;
+        renderTable();
+    }
+
+    function getFilteredData() {
+        return scannedData.filter(item => {
+            const matchesSearch = item["Transaction Number"].toLowerCase().includes(searchTerm);
+            const matchesLoadId = (item["Load ID"] || "").toLowerCase().includes(filterLoadId);
+            let matchesDate = true;
+            if (filterDateFrom || filterDateTo) {
+                const d = new Date(item["Timestamp"]);
+                if (!isNaN(d)) {
+                    const itemYMD = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+                    if (filterDateFrom && itemYMD < filterDateFrom) matchesDate = false;
+                    if (filterDateTo && itemYMD > filterDateTo) matchesDate = false;
+                } else {
+                    matchesDate = false;
+                }
+            }
+            
+            let matchesStatus = true;
+            if (filterStatus === 'loaded') matchesStatus = !!item["Loaded Time"];
+            else if (filterStatus === 'unloaded') matchesStatus = !item["Loaded Time"];
+
+            return matchesSearch && matchesDate && matchesStatus && matchesLoadId;
+        });
+    }
+
+    function renderTable() {
+        tbody.innerHTML = '';
+        const filteredData = getFilteredData();
+        const start = (currentPage - 1) * rowsPerPage;
+        const end = start + rowsPerPage;
+        const pageItems = filteredData.slice(start, end);
+
+        // Update Select All checkbox based on visible items
+        const allVisibleSelected = pageItems.length > 0 && pageItems.every(item => selectedTransactions.has(item["Transaction Number"]));
+        const selectAllCheckbox = document.getElementById('selectAll');
+        selectAllCheckbox.checked = allVisibleSelected;
+        selectAllCheckbox.indeterminate = !allVisibleSelected && pageItems.some(item => selectedTransactions.has(item["Transaction Number"]));
+
+        pageItems.forEach(item => {
+            const row = tbody.insertRow();
+            row.tabIndex = 0; // Make row focusable
+            
+            // Restore focus if this row was focused before re-render
+            if (item["Transaction Number"] === focusedTransactionId) {
+                setTimeout(() => row.focus(), 0);
+            }
+
+            row.onfocus = () => { focusedTransactionId = item["Transaction Number"]; };
+            row.onkeydown = (e) => {
+                if (e.key === ' ') { 
+                    e.preventDefault(); 
+                    toggleSelection(item["Transaction Number"], !selectedTransactions.has(item["Transaction Number"])); 
+                } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    const next = row.nextElementSibling;
+                    if (next) next.focus();
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    const prev = row.previousElementSibling;
+                    if (prev) prev.focus();
+                }
+            };
+            
+            const cellCheck = row.insertCell(0);
+            const cell1 = row.insertCell(1);
+            const cell2 = row.insertCell(2);
+            const cell3 = row.insertCell(3);
+            const cell4 = row.insertCell(4);
+            const cell5 = row.insertCell(5);
+            const cell6 = row.insertCell(6);
+            const cell7 = row.insertCell(7);
+            const cell8 = row.insertCell(8);
+            const cell9 = row.insertCell(9);
+
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = selectedTransactions.has(item["Transaction Number"]);
+            checkbox.onchange = (e) => toggleSelection(item["Transaction Number"], e.target.checked);
+            cellCheck.appendChild(checkbox);
+
+            cell1.textContent = item["Transaction Number"];
+            cell2.textContent = item["Timestamp"];
+            cell3.textContent = item["From Branch"] || "-";
+            cell4.textContent = item["To Branch"] || "-";
+            cell5.textContent = item["Plate Number"];
+            cell6.textContent = item["Trucker Name"] || "-";
+            cell7.textContent = item["Load ID"] || "-";
+            cell8.textContent = item["Loaded Time"] || "-";
+
+            // Load Button (only if not loaded)
+            if (!item["Loaded Time"]) {
+                const loadBtn = document.createElement('button');
+                loadBtn.innerHTML = '🚚'; // Truck icon
+                loadBtn.title = 'Mark as Loaded';
+                loadBtn.className = 'icon-btn';
+                loadBtn.onclick = function() {
+                    item["Loaded Time"] = new Date().toLocaleString();
+                    if (currentPlate !== "N/A") {
+                        item["Plate Number"] = currentPlate;
+                        item["Trucker Name"] = currentTruckerName;
+                        item["Load ID"] = currentLoadId;
+                    }
+                    saveData();
+                    renderTable();
+                };
+                cell9.appendChild(loadBtn);
+            }
+
+            const editBtn = document.createElement('button');
+            editBtn.innerHTML = '✏️';
+            editBtn.title = 'Edit Plate';
+            editBtn.className = 'icon-btn';
+            editBtn.onclick = function() {
+                openModal(scannedData.indexOf(item));
+            };
+
+            const timeBtn = document.createElement('button');
+            timeBtn.innerHTML = '🕒';
+            timeBtn.title = 'Edit Time';
+            timeBtn.className = 'icon-btn';
+            timeBtn.onclick = function() {
+                openTimeModal(scannedData.indexOf(item));
+            };
+
+            const deleteBtn = document.createElement('button');
+            deleteBtn.innerHTML = '🗑️';
+            deleteBtn.title = 'Delete';
+            deleteBtn.className = 'icon-btn';
+            deleteBtn.onclick = function() {
+                const index = scannedData.indexOf(item);
+                if (index > -1) scannedData.splice(index, 1);
+                selectedTransactions.delete(item["Transaction Number"]); // Remove from selection if deleted individually
+                // Check if current page is empty after deletion
+                const currentFiltered = scannedData.filter(i => i["Transaction Number"].toLowerCase().includes(searchTerm));
+                const totalPages = Math.ceil(currentFiltered.length / rowsPerPage) || 1;
+                if (currentPage > totalPages) currentPage = totalPages;
+                renderTable();
+                saveData();
+            };
+            cell9.appendChild(editBtn);
+            cell9.appendChild(timeBtn);
+            cell9.appendChild(deleteBtn);
+        });
+        updateBulkButton();
+        updatePagination(filteredData.length); // This should use filtered length
+        updateSummary(filteredData); // Pass filtered data to summary
+    }
+
+    function toggleSelection(id, isChecked) {
+        if (isChecked) selectedTransactions.add(id);
+        else selectedTransactions.delete(id);
+        renderTable(); // Re-render to update header checkbox state
+    }
+
+    function toggleSelectAll(source) {
+        const filteredData = getFilteredData();
+        const start = (currentPage - 1) * rowsPerPage;
+        const end = start + rowsPerPage;
+        const pageItems = filteredData.slice(start, end);
+
+        pageItems.forEach(item => {
+            if (source.checked) selectedTransactions.add(item["Transaction Number"]);
+            else selectedTransactions.delete(item["Transaction Number"]);
+        });
+        renderTable();
+    }
+
+    function executeBulkDelete() {
+        if (selectedTransactions.size === 0) return;
+        if (!confirm(`Are you sure you want to delete ${selectedTransactions.size} items?`)) return;
+
+        scannedData = scannedData.filter(item => !selectedTransactions.has(item["Transaction Number"]));
+        selectedTransactions.clear();
+        saveData();
+        renderTable();
+    }
+
+    function executeBulkLoad() {
+        if (selectedTransactions.size === 0) return;
+        const now = new Date().toLocaleString();
+        let updatedCount = 0;
+        
+        scannedData.forEach(item => {
+            if (selectedTransactions.has(item["Transaction Number"])) {
+                let changed = false;
+                // Apply current truck info if selected, even if already loaded (fixes N/A mistakes)
+                if (currentPlate !== "N/A") {
+                    if (item["Plate Number"] !== currentPlate || item["Trucker Name"] !== currentTruckerName || item["Load ID"] !== currentLoadId) {
+                        item["Plate Number"] = currentPlate;
+                        item["Trucker Name"] = currentTruckerName;
+                        item["Load ID"] = currentLoadId;
+                        changed = true;
+                    }
+                }
+                if (!item["Loaded Time"]) { item["Loaded Time"] = now; changed = true; }
+                if (changed) updatedCount++;
+            }
+        });
+
+        if (updatedCount > 0) {
+            saveData();
+        }
+        selectedTransactions.clear();
+        renderTable();
+    }
+
+    function saveData() {
+        localStorage.setItem('scannedTransactions', JSON.stringify(scannedData));
+        updateSummary();
+    }
+
+    function updateBulkButton() {
+        const deleteBtn = document.getElementById('bulkDeleteBtn');
+        const loadBtn = document.getElementById('bulkLoadBtn');
+        if (selectedTransactions.size > 0) {
+            deleteBtn.style.display = 'inline-block';
+            deleteBtn.textContent = `Delete Selected (${selectedTransactions.size})`;
+            loadBtn.style.display = 'inline-block';
+            loadBtn.textContent = `Load Selected (${selectedTransactions.size})`;
+        } else {
+            deleteBtn.style.display = 'none';
+            loadBtn.style.display = 'none';
+        }
+    }
+
+    function updateSummary(dataToSummarize) {
+        // If no data is passed, use all data (for initial load)
+        const sourceData = dataToSummarize || scannedData;
+        const total = sourceData.length;
+        document.getElementById('totalScans').textContent = total;
+        
+        const uniquePlates = new Set(sourceData.map(i => i["Plate Number"]).filter(p => p !== "N/A"));
+        document.getElementById('uniqueTrucks').textContent = uniquePlates.size;
+
+        const loaded = sourceData.filter(i => i["Loaded Time"]).length;
+        const unloaded = total - loaded;
+        const percent = total > 0 ? Math.round((loaded / total) * 100) : 0;
+
+        document.getElementById('loadedCount').textContent = loaded;
+        document.getElementById('unloadedCount').textContent = unloaded;
+        document.getElementById('loadProgress').textContent = percent + "%";
+        const progressBar = document.getElementById('progressBar');
+        progressBar.style.width = percent + "%";
+        progressBar.style.backgroundColor = percent < 50 ? "#dc3545" : "#28a745";
+
+        if (total > 0) {
+            // Show time of the most recent item in the filtered set
+            const latest = sourceData[0]["Timestamp"].split(',')[1] || sourceData[0]["Timestamp"];
+            document.getElementById('latestScan').textContent = latest;
+        } else {
+            document.getElementById('latestScan').textContent = "-";
+        }
+    }
+
+    function updatePagination(totalItems) {
+        const totalPages = Math.ceil(totalItems / rowsPerPage) || 1;
+        document.getElementById('pageInfo').textContent = `Page ${currentPage} of ${totalPages}`;
+        document.getElementById('prevBtn').disabled = currentPage === 1;
+        document.getElementById('nextBtn').disabled = currentPage === totalPages;
+    }
+
+    function changePage(step) {
+        currentPage += step;
+        renderTable();
+    }
+
+    function changeRowsPerPage(val) {
+        rowsPerPage = parseInt(val);
+        currentPage = 1;
+        renderTable();
+    }
+
+    function exportToExcel() {
+        if (scannedData.length === 0) {
+            showToast("No data to export!", "error");
+            return;
+        }
+        
+        // Create a new workbook and worksheet
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.json_to_sheet(scannedData);
+
+        // Append worksheet to workbook
+        XLSX.utils.book_append_sheet(wb, ws, "Transactions");
+
+        // Generate Excel file
+        XLSX.writeFile(wb, "scanned_transactions.xlsx");
+    }
+
+    function printLoadedPDF() {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        
+        // Filter for loaded items within current view filters
+        const dataToPrint = getFilteredData().filter(item => item["Loaded Time"]);
+
+        if (dataToPrint.length === 0) {
+            showToast("No loaded transactions found to print!", "error");
+            return;
+        }
+
+        // Group data by Trucker/Plate
+        const groups = {};
+        dataToPrint.forEach(item => {
+            const plate = item["Plate Number"] || "N/A";
+            const trucker = item["Trucker Name"] || "N/A";
+            const loadId = item["Load ID"] || "N/A";
+            const key = `Truck: ${plate} - Driver: ${trucker} - Load: ${loadId}`;
+            if (!groups[key]) groups[key] = [];
+            groups[key].push([
+                item["Transaction Number"],
+                item["Timestamp"],
+                item["Loaded Time"]
+            ]);
+        });
+
+        let yPos = 15;
+        doc.setFontSize(16);
+        doc.text("Loaded Details Manifest", 14, yPos);
+        doc.setFontSize(10);
+        doc.text(`Generated: ${new Date().toLocaleString()}`, 195, yPos, { align: 'right' });
+        yPos += 5;
+
+        // Summary Box
+        const uniqueTrucks = new Set(dataToPrint.map(i => i["Plate Number"])).size;
+        const uniqueLoads = new Set(dataToPrint.map(i => i["Load ID"]).filter(l => l)).size;
+
+        doc.setDrawColor(200);
+        doc.setFillColor(250, 250, 250);
+        doc.rect(14, yPos, 182, 20, 'FD');
+        
+        doc.setFontSize(9);
+        doc.text(`Total Transactions: ${dataToPrint.length}`, 18, yPos + 7);
+        doc.text(`Unique Trucks: ${uniqueTrucks}`, 18, yPos + 14);
+        doc.text(`Date Range: ${filterDateFrom || 'Start'} to ${filterDateTo || 'Present'}`, 80, yPos + 7);
+        doc.text(`Unique Loads: ${uniqueLoads}`, 80, yPos + 14);
+        
+        // Add Route info to PDF Summary
+        const routeText = (currentFromBranch && currentToBranch) ? `Route: ${currentFromBranch} -> ${currentToBranch}` : "Route: N/A";
+        doc.text(routeText, 140, yPos + 7);
+
+        if (filterLoadId) doc.text(`Filtered by Load ID: ${filterLoadId}`, 140, yPos + 7);
+        
+        yPos += 25;
+
+        Object.keys(groups).forEach(key => {
+            if (yPos > 270) {
+                doc.addPage();
+                yPos = 20;
+            }
+            doc.setFontSize(12);
+            doc.setFont(undefined, 'bold');
+            doc.text(`${key} (${groups[key].length} items)`, 14, yPos);
+            doc.setFont(undefined, 'normal');
+            yPos += 3;
+            
+            doc.autoTable({
+                startY: yPos,
+                head: [['Transaction', 'Scanned Time', 'Loaded Time']],
+                body: groups[key],
+                theme: 'striped',
+                headStyles: { fillColor: [60, 60, 60] },
+                margin: { left: 14, right: 14 }
+            });
+            yPos = doc.lastAutoTable.finalY + 35;
+
+            // Check for page break for signatures
+            if (yPos > 270) {
+                doc.addPage();
+                yPos = 40;
+            }
+
+            doc.setFontSize(10);
+            doc.line(14, yPos - 15, 80, yPos - 15); // Signature line 1
+            doc.text("Trucker Signature", 14, yPos - 10);
+            
+            doc.line(120, yPos - 15, 186, yPos - 15); // Signature line 2
+            doc.text("Prepared By", 120, yPos - 10);
+            
+            yPos += 15;
+        });
+
+        // Add Page Numbers
+        const pageCount = doc.internal.getNumberOfPages();
+        for(let i = 1; i <= pageCount; i++) {
+            doc.setPage(i);
+            doc.setFontSize(8);
+            doc.text('Page ' + i + ' of ' + pageCount, 105, 290, { align: 'center' });
+        }
+
+        doc.save("Loaded_Manifest.pdf");
+    }
+
+    // Audio Context for sound effects
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    function playSuccessSound() {
+        // Resume context if suspended (browser autoplay policy)
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        
+        const oscillator = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(1000, audioCtx.currentTime); // 1000Hz (High beep)
+        gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.1);
+        
+        oscillator.start();
+        oscillator.stop(audioCtx.currentTime + 0.1);
+    }
+
+    function playErrorSound() {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        
+        const oscillator = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        
+        oscillator.type = 'sawtooth'; // Harsher sound
+        oscillator.frequency.setValueAtTime(150, audioCtx.currentTime); // 150Hz (Low buzz)
+        gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.3);
+        
+        oscillator.start();
+        oscillator.stop(audioCtx.currentTime + 0.3);
+    }
+
+    function openModal(index = null) {
+        editIndex = index;
+        document.getElementById('plateModal').style.display = 'block';
+        const input = document.getElementById('plateInput');
+        const loadInput = document.getElementById('loadIdInput');
+        const title = document.querySelector('#plateModal h3');
+
+        if (editIndex !== null) {
+            title.textContent = "Edit Plate for " + scannedData[editIndex]["Transaction Number"];
+            input.value = scannedData[editIndex]["Plate Number"] || "";
+            loadInput.value = scannedData[editIndex]["Load ID"] || "";
+        } else {
+            title.textContent = "Enter Default Plate";
+            input.value = currentPlate === "N/A" ? "" : currentPlate;
+            loadInput.value = currentLoadId;
+        }
+    }
+
+    function closeModal() {
+        document.getElementById('plateModal').style.display = 'none';
+        editIndex = null;
+        input.focus();
+    }
+
+    function openMasterModal() {
+        document.getElementById('masterModal').style.display = 'block';
+        renderMasterList();
+        document.getElementById('newPlateInput').focus();
+    }
+
+    function closeMasterModal() {
+        document.getElementById('masterModal').style.display = 'none';
+        input.focus();
+    }
+
+    function renderMasterList() {
+        const list = document.getElementById('masterList');
+        list.innerHTML = '';
+        masterPlates.forEach((item, index) => {
+            const li = document.createElement('li');
+            li.style.cssText = "display: flex; justify-content: space-between; padding: 8px; border-bottom: 1px solid #eee; align-items: center;";
+            
+            const span = document.createElement('span');
+            span.textContent = item.plate + (item.name ? ` (${item.name})` : '');
+            
+            const btn = document.createElement('button');
+            btn.textContent = '×';
+            btn.style.cssText = "background: #dc3545; color: white; border: none; padding: 0 6px; cursor: pointer; font-size: 16px; line-height: 20px; border-radius: 4px;";
+            btn.onclick = () => deleteMasterPlate(index);
+            
+            li.appendChild(span);
+            li.appendChild(btn);
+            list.appendChild(li);
+        });
+    }
+
+    function addMasterPlate() {
+        const input = document.getElementById('newPlateInput');
+        const nameInput = document.getElementById('newTruckerInput');
+        const val = input.value.trim().toUpperCase();
+        const nameVal = nameInput.value.trim();
+        if(val && !masterPlates.some(p => p.plate === val)) {
+            masterPlates.push({ plate: val, name: nameVal });
+            masterPlates.sort((a, b) => a.plate.localeCompare(b.plate));
+            localStorage.setItem('masterPlates', JSON.stringify(masterPlates));
+            updatePlateDatalist();
+            renderMasterList();
+            input.value = '';
+            nameInput.value = '';
+        } else if (masterPlates.some(p => p.plate === val)) {
+            showToast('Plate already exists', "error");
+        }
+    }
+
+    function deleteMasterPlate(index) {
+        if(confirm('Remove this plate from master list?')) {
+            masterPlates.splice(index, 1);
+            localStorage.setItem('masterPlates', JSON.stringify(masterPlates));
+            updatePlateDatalist();
+            renderMasterList();
+        }
+    }
+
+    function updatePlateDatalist() {
+        const dataList = document.getElementById('plateList');
+        dataList.innerHTML = '';
+        masterPlates.forEach(item => {
+            const option = document.createElement('option');
+            option.value = item.plate;
+            dataList.appendChild(option);
+        });
+    }
+
+    function updateTruckDisplay() {
+        const text = currentPlate === "N/A" ? "N/A" : `${currentPlate} ${currentTruckerName ? '(' + currentTruckerName + ')' : ''}`;
+        const loadText = currentLoadId ? ` | Load: ${currentLoadId}` : "";
+        document.getElementById('truckDisplay').textContent = "Current Truck: " + text + loadText;
+    }
+
+    function savePlate() {
+        const selectedValue = document.getElementById('plateInput').value.trim() || "N/A";
+        const loadIdValue = document.getElementById('loadIdInput').value.trim();
+        // Lookup name
+        const matched = masterPlates.find(m => m.plate === selectedValue);
+        const nameValue = matched ? matched.name : "";
+        
+        if (editIndex !== null) {
+            // Update specific row
+            scannedData[editIndex]["Plate Number"] = selectedValue;
+            scannedData[editIndex]["Trucker Name"] = nameValue;
+            scannedData[editIndex]["Load ID"] = loadIdValue;
+            saveData();
+            renderTable();
+        } else {
+            // Set global default
+            currentPlate = selectedValue;
+            currentTruckerName = nameValue;
+            currentLoadId = loadIdValue;
+            localStorage.setItem('currentPlate', currentPlate);
+            localStorage.setItem('currentTruckerName', currentTruckerName);
+            localStorage.setItem('currentLoadId', currentLoadId);
+            updateTruckDisplay();
+            document.getElementById('scanInput').focus();
+        }
+        closeModal();
+    }
+
+    function openTimeModal(index) {
+        editIndex = index;
+        document.getElementById('timeModal').style.display = 'block';
+        document.getElementById('timeInput').value = scannedData[index]["Loaded Time"] || scannedData[index]["Timestamp"];
+        document.getElementById('timeInput').focus();
+    }
+
+    function closeTimeModal() {
+        document.getElementById('timeModal').style.display = 'none';
+        editIndex = null;
+        input.focus();
+    }
+
+    function saveTime() {
+        if (editIndex !== null) {
+            const newVal = document.getElementById('timeInput').value.trim();
+            if (newVal) {
+                scannedData[editIndex]["Loaded Time"] = newVal;
+                saveData();
+                renderTable();
+            }
+        }
+        closeTimeModal();
+    }
+
+    function showToast(message, type = 'info') {
+        const container = document.getElementById('toast-container');
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+        container.appendChild(toast);
+        
+        // Fade out and remove after 3 seconds
+        setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 3000);
+    }
+
+    function attemptLogin() {
+        const u = document.getElementById('loginUser').value;
+        const p = document.getElementById('loginPass').value;
+        
+        // Simple hardcoded credentials (admin / 1234)
+        if (u === 'admin' && p === '1234') {
+            document.getElementById('loginOverlay').style.display = 'none';
+            
+            // Show Branch Overlay
+            document.getElementById('branchOverlay').style.display = 'flex';
+            document.getElementById('fromBranchInput').value = currentFromBranch;
+            document.getElementById('toBranchInput').value = currentToBranch;
+            document.getElementById('fromBranchInput').focus();
+        } else {
+            document.getElementById('loginError').style.display = 'block';
+        }
+    }
+
+    function confirmBranchInfo() {
+        const from = document.getElementById('fromBranchInput').value.trim();
+        const to = document.getElementById('toBranchInput').value.trim();
+
+        if (from && to) {
+            currentFromBranch = from;
+            currentToBranch = to;
+            localStorage.setItem('currentFromBranch', from);
+            localStorage.setItem('currentToBranch', to);
+            document.getElementById('branchOverlay').style.display = 'none';
+            document.getElementById('routeDisplay').textContent = `${currentFromBranch} ➝ ${currentToBranch}`;
+            document.getElementById('scanInput').focus();
+        } else {
+            showToast("Please enter both Branch codes", "error");
+        }
+    }
+
+    function logout() {
+        document.getElementById('loginOverlay').style.display = 'flex';
+        document.getElementById('branchOverlay').style.display = 'none';
+        document.getElementById('loginUser').value = '';
+        document.getElementById('loginPass').value = '';
+        document.getElementById('loginError').style.display = 'none';
+    }
+
+    // Initialize
+    updatePlateDatalist();
+    updateTruckDisplay();
+    if(currentFromBranch && currentToBranch) {
+        document.getElementById('routeDisplay').textContent = `${currentFromBranch} ➝ ${currentToBranch}`;
+    }
+    updateSummary(scannedData); // Initial summary for all data
+    document.getElementById('cardTotal').classList.add('active-filter');
+    renderTable();
+</script>
+
+</body>
+</html>
