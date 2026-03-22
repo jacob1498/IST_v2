@@ -455,7 +455,10 @@
                         item["Load ID"] = currentLoadId;
                     }
                     saveData();
+                    document.getElementById('searchInput').value = '';
+                    searchTerm = "";
                     renderTable();
+                    input.focus();
                 };
                 cell10.appendChild(loadBtn);
             }
@@ -564,7 +567,10 @@
             saveData();
         }
         selectedTransactions.clear();
+        document.getElementById('searchInput').value = '';
+        searchTerm = "";
         renderTable();
+        input.focus();
     }
 
     function saveData() {
